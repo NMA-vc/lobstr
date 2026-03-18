@@ -12,25 +12,19 @@ import urllib.request
 import urllib.parse
 import urllib.error
 
-# Auto-load .env from workspace root (two levels up from this script)
-_script_dir = os.path.dirname(os.path.abspath(__file__))
-_env_path = os.path.join(_script_dir, "..", "..", ".env")
-if os.path.isfile(_env_path):
-    with open(_env_path) as _f:
-        for _line in _f:
-            _line = _line.strip()
-            if _line and not _line.startswith("#") and "=" in _line:
-                _k, _, _v = _line.partition("=")
-                os.environ.setdefault(_k.strip(), _v.strip())
-
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 EXA_API_KEY = os.environ.get("EXA_API_KEY", "")
 
+missing = []
 if not ANTHROPIC_API_KEY:
-    print("Error: ANTHROPIC_API_KEY environment variable not set.", file=sys.stderr)
-    sys.exit(1)
+    missing.append("ANTHROPIC_API_KEY")
 if not EXA_API_KEY:
-    print("Error: EXA_API_KEY environment variable not set.", file=sys.stderr)
+    missing.append("EXA_API_KEY")
+if missing:
+    print(f"Error: missing required environment variable(s): {', '.join(missing)}", file=sys.stderr)
+    print("Export them in your shell before running lobstr.py:", file=sys.stderr)
+    for key in missing:
+        print(f"  export {key}=<your-key>", file=sys.stderr)
     sys.exit(1)
 
 # ── helpers ──────────────────────────────────────────────────────────────────

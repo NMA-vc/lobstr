@@ -1,6 +1,6 @@
 ---
 name: lobstr
-version: 0.1.0
+version: "0.1.0"
 description: >
   LOBSTR is a startup idea scorer. Use when a user types /lobstr followed by a startup idea (e.g. /lobstr "AI-powered legal contracts for SMEs"). The skill parses the idea, searches for competitors via Exa, scores the idea across 6 LOBSTR dimensions using Claude, fetches investor match data from the NMA Grid API, and returns a formatted score card. Requires ANTHROPIC_API_KEY and EXA_API_KEY in environment.
 ---
@@ -23,10 +23,15 @@ The script handles the full pipeline and prints the formatted score card. Captur
 
 If the script errors (missing API keys, network issues), surface the error message to the user clearly.
 
-## Environment Variables Required
+## Requirements
 
 - `ANTHROPIC_API_KEY` — for Claude haiku (parsing) and Claude sonnet (scoring)
 - `EXA_API_KEY` — for competitor search
+- No `.env` file is loaded — keys must be exported in the shell before running:
+  ```bash
+  export ANTHROPIC_API_KEY=<your-key>
+  export EXA_API_KEY=<your-key>
+  ```
 
 ## Score Card Format (for reference)
 
