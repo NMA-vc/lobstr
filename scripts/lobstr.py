@@ -250,6 +250,99 @@ def format_card(idea: str, scores: dict, grid: dict) -> str:
     return "\n".join(lines)
 
 
+# ── step 5: build score_json for publishing ───────────────────────────────────
+
+def build_score_json(scores: dict, parsed: dict, competitors: list[str], grid: dict) -> dict:
+    """Normalize lobstr scores into the score_json shape expected by runlobstr.com."""
+    dim_labels = {
+        "L": "Landscape",
+        "O": "Opportunity",
+        "B": "Business model",
+        "S": "Sharpness",
+        "T": "Timing",
+        "R": "Reach",
+    }
+
+    overall = scores.get("overall", 0)
+
+    # Derive signal from overall score
+    if overall >= 70:
+        signal = "STRONG"
+    elif overall >= 50:
+        signal = "MODERATE"
+    else:
+        signal = "WEAK"
+
+    # Derive competitor density from number of competitors found
+    comp_list = []
+    for c in competitors:
+        # Parse "• Title (url) — snippet" format
+        if c.startswith("• "):
+            parts = c[2:].split(" (", 1)
+            title = parts[0].strip()
+            url = ""
+            if len(parts) > 1:
+                url = parts[1].split(")", 1)[0]
+            comp_list.append({"title": title, "url": url})
+
+    if len(comp_list) >= 8:
+        density = "HIGH"
+    elif len(comp_list) >= 4:
+        density = "MEDIUM"
+    else:
+        density = "LOW"
+
+    dimensions = {}
+    for key, label in dim_labels.items():
+        d = scores.get(key, {})
+        dimensions[key] = {
+            "label": label,
+            "score": d.get("score", 0),
+            "verdict": d.get("verdict", ""),
+        }
+
+    return {
+        "overall_score": overall,
+        "signal": signal,
+        "competitor_density": density,
+        "build_it": scores.get("build_it", False),
+        "verdict": scores.get("verdict", ""),
+        "dimensions": dimensions,
+        "grid": {
+            "investor_count": grid.get("investor_count", 0),
+            "match_quality": grid.get("match_quality", "unknown"),
+        },
+        "competitors": comp_list[:10],
+    }
+
+
+# ── step 6: publish to runlobstr.com ──────────────────────────────────────────
+
+def publish_card(idea: str, score_json: dict) -> str | None:
+    """POST to runlobstr.com/api/publish. Returns public URL or None."""
+    try:
+        payload = json.dumps({
+            "idea": idea,
+            "score_json": score_json,
+        }).encode()
+
+        req = urllib.request.Request(
+            "https://runlobstr.com/api/publish",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            return data.get("url")
+    except Exception as e:
+        # Non-fatal — score card still works without the URL
+        print(f"[runlobstr] publish failed: {e}", file=sys.stderr)
+        return None
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -278,6 +371,12 @@ def main():
     # Step 5: format and print
     card = format_card(idea, scores, grid)
     print(card)
+
+    # Step 6: publish to runlobstr.com (non-fatal, silent skip if no secret)
+    score_json = build_score_json(scores, parsed, competitors, grid)
+    public_url = publish_card(idea, score_json)
+    if public_url:
+        print(f"\nShare your scan: {public_url}")
 
 
 if __name__ == "__main__":
