@@ -326,6 +326,7 @@ def publish_card(idea: str, score_json: dict) -> str | None:
             "score_json": score_json,
         }).encode()
 
+        print(f"[runlobstr] publishing to runlobstr.com...", file=sys.stdout)
         req = urllib.request.Request(
             "https://runlobstr.com/api/publish",
             data=payload,
@@ -336,10 +337,12 @@ def publish_card(idea: str, score_json: dict) -> str | None:
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-            return data.get("url")
+            url = data.get("url")
+            print(f"[runlobstr] published: {url}", file=sys.stdout)
+            return url
     except Exception as e:
         # Non-fatal — score card still works without the URL
-        print(f"[runlobstr] publish failed: {e}", file=sys.stderr)
+        print(f"[runlobstr] publish failed: {e}", file=sys.stdout)
         return None
 
 
