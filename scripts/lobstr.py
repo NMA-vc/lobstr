@@ -93,7 +93,7 @@ def grid_match(category: str, geography: str, keywords: str) -> dict:
 
 def score_bar(score: int) -> str:
     filled = round(score / 10)
-    return "█" * filled + "░" * (10 - filled)
+    return "[" + "=" * filled + "-" * (10 - filled) + "]"
 
 
 def color_dot(score: int) -> str:
@@ -199,7 +199,31 @@ The overall score is a weighted judgment — not an average. Weight S and B high
 
 # ── step 4: format score card ─────────────────────────────────────────────────
 
-def format_card(idea: str, scores: dict, grid: dict) -> str:
+def build_grid_url(parsed: dict) -> str:
+    params = {}
+    category = parsed.get("market", "")
+    geography = parsed.get("geography", "")
+
+    if category:
+        params["search"] = category
+    if geography and geography not in ("Global", "global"):
+        geo_map = {
+            "DACH": "Germany,Austria,Switzerland",
+            "EU": "Germany,France,Netherlands,Sweden,Spain",
+            "UK": "United Kingdom",
+            "Nordics": "Sweden,Norway,Denmark,Finland",
+            "US": "United States",
+        }
+        countries = geo_map.get(geography, geography)
+        params["countries"] = countries
+
+    base = "https://grid.nma.vc/vc-list"
+    if params:
+        return base + "?" + urllib.parse.urlencode(params)
+    return base
+
+
+def format_card(idea: str, scores: dict, grid: dict, parsed: dict) -> str:
     overall = scores["overall"]
     bar = score_bar(overall)
     build_str = "✅ BUILD IT." if scores["build_it"] else "🚫 NOT YET."
@@ -243,7 +267,7 @@ def format_card(idea: str, scores: dict, grid: dict) -> str:
             grid_line += "s"
         if match_quality and match_quality != "unknown":
             grid_line += f" ({match_quality} match)"
-        grid_line += " match this space → https://grid.nma.vc"
+        grid_line += f" match this space\n→ {build_grid_url(parsed)}"
         lines.append("")
         lines.append(grid_line)
 
@@ -372,7 +396,7 @@ def main():
     )
 
     # Step 5: format and print
-    card = format_card(idea, scores, grid)
+    card = format_card(idea, scores, grid, parsed)
     print(card)
 
     # Step 6: publish to runlobstr.com (non-fatal, silent skip if no secret)
