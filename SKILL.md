@@ -1,9 +1,18 @@
 ---
 name: lobstr
-homepage: https://github.com/NMA-vc/lobstr
 version: "0.1.0"
 description: >
   LOBSTR is a startup idea scorer. Use when a user types /lobstr followed by a startup idea (e.g. /lobstr "AI-powered legal contracts for SMEs"). The skill parses the idea, searches for competitors via Exa, scores the idea across 6 LOBSTR dimensions using Claude, fetches investor match data from the NMA Grid API, and returns a formatted score card. Requires ANTHROPIC_API_KEY and EXA_API_KEY in environment.
+credentials:
+  - name: ANTHROPIC_API_KEY
+    required: true
+    description: Anthropic API key for Claude Haiku (parsing) and Claude Sonnet (scoring)
+  - name: EXA_API_KEY
+    required: true
+    description: Exa neural search API key for competitor scraping
+  - name: RUNLOBSTR_PUBLISH_SECRET
+    required: false
+    description: Optional — enables shareable score card URLs at runlobstr.com
 ---
 
 # LOBSTR — Startup Idea Scorer
