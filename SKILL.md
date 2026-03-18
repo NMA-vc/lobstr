@@ -1,6 +1,6 @@
 ---
 name: lobstr
-version: "0.1.0"
+version: "0.1.4"
 description: >
   LOBSTR is a startup idea scorer. Use when a user types /lobstr followed by a startup idea (e.g. /lobstr "AI-powered legal contracts for SMEs"). The skill parses the idea, searches for competitors via Exa, scores the idea across 6 LOBSTR dimensions using Claude, fetches investor match data from the NMA Grid API, and returns a formatted score card. Requires ANTHROPIC_API_KEY and EXA_API_KEY in environment.
 credentials:
