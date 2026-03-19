@@ -350,7 +350,6 @@ def publish_card(idea: str, score_json: dict) -> str | None:
             "score_json": score_json,
         }).encode()
 
-        print(f"[runlobstr] publishing to runlobstr.com...", file=sys.stdout)
         req = urllib.request.Request(
             "https://runlobstr.com/api/publish",
             data=payload,
@@ -361,13 +360,120 @@ def publish_card(idea: str, score_json: dict) -> str | None:
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-            url = data.get("url")
-            print(f"[runlobstr] published: {url}", file=sys.stdout)
-            return url
-    except Exception as e:
-        # Non-fatal — score card still works without the URL
-        print(f"[runlobstr] publish failed: {e}", file=sys.stdout)
+            return data.get("url")
+    except Exception:
         return None
+
+
+# ── step 7: post to moltbook m/lobstrscore ───────────────────────────────────
+
+def _moltbook_verify(api_key: str, verification_code: str, challenge_text: str) -> bool:
+    """Solve the lobster math challenge and submit the answer."""
+    import re
+    # Strip obfuscation: remove non-alpha/space/digit chars, lowercase, collapse spaces
+    clean = re.sub(r"[^a-zA-Z0-9 ]", " ", challenge_text).lower()
+    clean = re.sub(r"\s+", " ", clean).strip()
+
+    # Extract all numbers
+    numbers = [float(n) for n in re.findall(r"\b\d+(?:\.\d+)?\b", clean)]
+    if len(numbers) < 2:
+        return False
+
+    # Detect operation from keywords
+    text = clean
+    if any(w in text for w in ["times", "multiplied", "multiply", "product"]):
+        answer = numbers[0] * numbers[1]
+    elif any(w in text for w in ["divided", "divide", "half", "quarter"]):
+        answer = numbers[0] / numbers[1]
+    elif any(w in text for w in ["minus", "subtract", "slows", "less", "slower", "reduced", "decrease"]):
+        answer = numbers[0] - numbers[1]
+    else:
+        answer = numbers[0] + numbers[1]
+
+    payload = json.dumps({
+        "verification_code": verification_code,
+        "answer": f"{answer:.2f}",
+    }).encode()
+    req = urllib.request.Request(
+        "https://www.moltbook.com/api/v1/verify",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            return data.get("success", False)
+    except Exception:
+        return False
+
+
+def post_to_moltbook(idea: str, card: str, public_url: str | None) -> None:
+    """Post the scan result to m/lobstrscore on Moltbook. Skipped if MOLTBOOK_API_KEY not set."""
+    api_key = os.environ.get("MOLTBOOK_API_KEY", "")
+    if not api_key:
+        return
+
+    overall = ""
+    for line in card.splitlines():
+        if line.startswith("LOBSTR SCORE"):
+            # extract e.g. "42/100"
+            import re
+            m = re.search(r"(\d+)/100", line)
+            if m:
+                overall = f" — {m.group(1)}/100"
+            break
+
+    # Title: truncate idea to 260 chars + score
+    title = idea[:260] + overall
+
+    content = card
+    if public_url:
+        content += f"\n\n🔗 Full scan: {public_url}"
+
+    post_payload = json.dumps({
+        "submolt_name": "lobstrscore",
+        "title": title,
+        "content": content,
+        "url": public_url or "https://runlobstr.com",
+        "type": "link" if public_url else "text",
+    }).encode()
+
+    req = urllib.request.Request(
+        "https://www.moltbook.com/api/v1/posts",
+        data=post_payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+
+        if not data.get("success"):
+            print(f"[moltbook] post failed: {data}", file=sys.stderr)
+            return
+
+        post = data.get("post", {})
+        verification = post.get("verification")
+        if verification:
+            code = verification.get("verification_code", "")
+            challenge = verification.get("challenge_text", "")
+            ok = _moltbook_verify(api_key, code, challenge)
+            if ok:
+                print(f"[moltbook] posted to m/lobstrscore ✓", file=sys.stdout)
+            else:
+                print(f"[moltbook] post created but verification failed", file=sys.stderr)
+        else:
+            print(f"[moltbook] posted to m/lobstrscore ✓", file=sys.stdout)
+
+    except Exception as e:
+        print(f"[moltbook] post failed: {e}", file=sys.stderr)
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -399,11 +505,14 @@ def main():
     card = format_card(idea, scores, grid, parsed)
     print(card)
 
-    # Step 6: publish to runlobstr.com (non-fatal, silent skip if no secret)
+    # Step 6: publish to runlobstr.com (non-fatal)
     score_json = build_score_json(scores, parsed, competitors, grid)
     public_url = publish_card(idea, score_json)
     if public_url:
         print(f"\nShare your scan: {public_url}")
+
+    # Step 7: post to Moltbook m/lobstrscore (non-fatal)
+    post_to_moltbook(idea, card, public_url)
 
 
 if __name__ == "__main__":
