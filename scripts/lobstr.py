@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 LOBSTR — Startup Idea Scorer
-Usage: python3 lobstr.py "your startup idea"
-Requires: ANTHROPIC_API_KEY, EXA_API_KEY
+Usage: python3 lobstr.py "your startup idea" [--public] [--moltbook] [--json]
+No API keys required — uses hosted API at runlobstr.com.
+Set ANTHROPIC_API_KEY + EXA_API_KEY for unlimited local scans (BYOK).
 """
 
 import json
@@ -15,17 +16,11 @@ import urllib.error
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 EXA_API_KEY = os.environ.get("EXA_API_KEY", "")
 
-missing = []
-if not ANTHROPIC_API_KEY:
-    missing.append("ANTHROPIC_API_KEY")
-if not EXA_API_KEY:
-    missing.append("EXA_API_KEY")
-if missing:
-    print(f"Error: missing required environment variable(s): {', '.join(missing)}", file=sys.stderr)
-    print("Export them in your shell before running lobstr.py:", file=sys.stderr)
-    for key in missing:
-        print(f"  export {key}=<your-key>", file=sys.stderr)
-    sys.exit(1)
+# BYOK mode: if both keys are set, run locally for unlimited scans.
+# Otherwise, use the free hosted API at runlobstr.com.
+BYOK = bool(ANTHROPIC_API_KEY and EXA_API_KEY)
+
+RUNLOBSTR_API = os.environ.get("RUNLOBSTR_API", "https://runlobstr.com/api/score")
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -476,43 +471,162 @@ def post_to_moltbook(idea: str, card: str, public_url: str | None) -> None:
         print(f"[moltbook] post failed: {e}", file=sys.stderr)
 
 
+# ── hosted API call (default, no keys needed) ────────────────────────────────
+
+def score_via_api(idea: str) -> dict | None:
+    """Call runlobstr.com/api/score. Returns the response dict or None on failure."""
+    try:
+        payload = json.dumps({"idea": idea}).encode()
+        req = urllib.request.Request(
+            RUNLOBSTR_API,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        try:
+            err = json.loads(body)
+            msg = err.get("message", body)
+        except Exception:
+            msg = body
+        print(f"Error: {msg}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"Error calling runlobstr.com: {e}", file=sys.stderr)
+        return None
+
+
+def format_api_card(idea: str, score_json: dict) -> str:
+    """Format a score card from the API response."""
+    overall = score_json.get("overall_score", 0)
+    bar = score_bar(overall)
+    build = score_json.get("build_it", False)
+    build_str = "✅ BUILD IT." if build else "🚫 NOT YET."
+
+    dim_labels = {
+        "L": "Landscape  ",
+        "O": "Opportunity",
+        "B": "Biz model  ",
+        "S": "Sharpness  ",
+        "T": "Timing     ",
+        "R": "Reach      ",
+    }
+
+    lines = [
+        "🦞 LOBSTR SCAN",
+        f'"{idea}"',
+        "",
+        f"LOBSTR SCORE  {overall}/100  {bar}",
+        "",
+    ]
+
+    dimensions = score_json.get("dimensions", {})
+    for key, label in dim_labels.items():
+        d = dimensions.get(key, {})
+        s = d.get("score", 0)
+        v = d.get("verdict", "")
+        lines.append(f"{key}  {label}  {color_dot(s)}  {s}/100  {v}")
+
+    lines += [
+        "",
+        "VERDICT",
+        score_json.get("verdict", ""),
+        "",
+        build_str,
+    ]
+
+    grid = score_json.get("grid", {})
+    investor_count = grid.get("investor_count", 0)
+    match_quality = grid.get("match_quality", "")
+    if investor_count:
+        grid_line = f"GRID: {investor_count} investor"
+        if investor_count != 1:
+            grid_line += "s"
+        if match_quality and match_quality != "unknown":
+            grid_line += f" ({match_quality} match)"
+        grid_line += " match this space"
+        lines.append("")
+        lines.append(grid_line)
+
+    return "\n".join(lines)
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 lobstr.py \"your startup idea\"", file=sys.stderr)
-        sys.exit(1)
+    import argparse
 
-    idea = " ".join(sys.argv[1:]).strip('"').strip("'")
-
-    # Step 1: parse
-    parsed = parse_idea(idea)
-
-    # Step 2: search
-    competitors = search_competitors(parsed.get("queries", []))
-
-    # Step 3: score
-    scores = score_idea(idea, parsed, competitors)
-
-    # Step 4: investor match
-    grid = grid_match(
-        category=parsed.get("category", ""),
-        geography=parsed.get("geography", ""),
-        keywords=parsed.get("market", idea[:60]),
+    parser = argparse.ArgumentParser(
+        description="LOBSTR — Startup Idea Scorer",
+        usage='python3 lobstr.py "your startup idea" [--public] [--moltbook] [--json]',
     )
+    parser.add_argument("idea", nargs="+", help="The startup idea to score")
+    parser.add_argument("--public", action="store_true",
+                        help="Publish score card to runlobstr.com and show the share URL")
+    parser.add_argument("--moltbook", action="store_true",
+                        help="Post scan result to m/lobstrscore on Moltbook")
+    parser.add_argument("--json", action="store_true",
+                        help="Output raw JSON instead of formatted score card (for agents)")
 
-    # Step 5: format and print
-    card = format_card(idea, scores, grid, parsed)
-    print(card)
+    args = parser.parse_args()
+    idea = " ".join(args.idea).strip('"').strip("'")
 
-    # Step 6: publish to runlobstr.com (non-fatal)
-    score_json = build_score_json(scores, parsed, competitors, grid)
-    public_url = publish_card(idea, score_json)
-    if public_url:
-        print(f"\nShare your scan: {public_url}")
+    if BYOK:
+        # ── BYOK path: local pipeline, unlimited scans ──
+        parsed = parse_idea(idea)
+        competitors = search_competitors(parsed.get("queries", []))
+        scores = score_idea(idea, parsed, competitors)
+        grid = grid_match(
+            category=parsed.get("category", ""),
+            geography=parsed.get("geography", ""),
+            keywords=parsed.get("market", idea[:60]),
+        )
 
-    # Step 7: post to Moltbook m/lobstrscore (non-fatal)
-    post_to_moltbook(idea, card, public_url)
+        score_json = build_score_json(scores, parsed, competitors, grid)
+
+        if args.json:
+            print(json.dumps(score_json, indent=2))
+        else:
+            card = format_card(idea, scores, grid, parsed)
+            print(card)
+
+        # Publish only if --public
+        public_url = None
+        if args.public:
+            public_url = publish_card(idea, score_json)
+            if public_url:
+                print(f"\nShare your scan: {public_url}")
+
+        # Moltbook only if --moltbook
+        if args.moltbook:
+            card = format_card(idea, scores, grid, parsed) if args.json else card
+            post_to_moltbook(idea, card, public_url)
+    else:
+        # ── Hosted API path: no keys needed ──
+        result = score_via_api(idea)
+        if not result:
+            sys.exit(1)
+
+        score_json = result.get("score_json", {})
+        public_url = result.get("url")
+
+        if args.json:
+            print(json.dumps(score_json, indent=2))
+        else:
+            card = format_api_card(idea, score_json)
+            print(card)
+
+        # Show URL only if --public
+        if args.public and public_url:
+            print(f"\nShare your scan: {public_url}")
+
+        # Moltbook only if --moltbook
+        if args.moltbook:
+            card = format_api_card(idea, score_json) if args.json else card
+            post_to_moltbook(idea, card, public_url if args.public else None)
 
 
 if __name__ == "__main__":
